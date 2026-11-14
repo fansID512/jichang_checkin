@@ -14,10 +14,23 @@
 
 | 参数   | 是否必须  | 内容  | 
 | ------------ | ------------ | ------------ |
+| URL | 是  | 机场地址，例如 `https://ikuuu.one`，尾部不要加 `/` |
 | CONFIG| 是  | 账号密码  |
+| COOKIE | 否  | 已登录状态的 Cookie（推荐，绕过验证码） |
 | SCKEY  | 否  | Sever酱秘钥  |
 <br/>
 <b>其中URL的值必须是机场网站的地址，例如：https://example.com</b>,尾部不要加''' / '''号 config写法：一行账号一行密码
 
 3. 到`Actions`中创建一个workflow，运行一次，以后每天项目都会自动运行。<br/>
 4. 最后，可以到Run sign查看签到情况，同时也会也会将签到详情推送到Sever酱。
+
+### 关于 COOKIE（推荐）
+
+站点登录用的是 GeeTest V4 验证码，社区的纯 Python 求解器在站点升级成「九宫格」题型后已失效，
+表现为日志里 `验证码求解失败，跳过此账号`。此时改用 Cookie 登录：
+
+1. 浏览器登录机场网站，按 F12 → Application/应用 → Cookies，或 Network 里任意请求的 `Cookie` 请求头
+2. 把整串 Cookie（形如 `uid=1234; email=a@b.com; key=xxxx; ip=1.2.3.4`）贴进 `COOKIE` 机密
+3. 多账号时**按行填写**，第 i 行对应 CONFIG 里的第 i 个账号；某行留空则该账号回退到账号密码登录
+
+COOKIE 有效期内直接签到，不再求解验证码。Cookie 过期后工作流会变红提醒你重新复制。

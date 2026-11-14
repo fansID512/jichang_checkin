@@ -34,6 +34,8 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
       - name: Fetch latest geeked solver
+        # 仅在走账号密码登录时才需要；配了 COOKIE 就不再依赖它，克隆失败也不影响签到
+        continue-on-error: true
         run: |
           git clone https://github.com/xKiian/GeekedTest.git temp_geeked
           python -c "
@@ -54,5 +56,6 @@ jobs:
           EMAIL: ${{ secrets.EMAIL }}
           PASSWD: ${{ secrets.PASSWD }}
           CONFIG: ${{ secrets.CONFIG }}
+          COOKIE: ${{ secrets.COOKIE }}
         run: |
           python3 ./main.py

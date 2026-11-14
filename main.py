@@ -1,13 +1,18 @@
-import requests, json, os, time
-from geeked import Geeked
+import json
+import os
+import sys
+import time
+
+import requests
 
 # 机场的地址
-url = os.environ.get('URL')
-# 配置用户名（一般是邮箱）
-
-config = os.environ.get('CONFIG')
+url = (os.environ.get('URL') or '').strip().rstrip('/')
+# 配置：按行存 偶数行=用户名 奇数行=密码
+config = os.environ.get('CONFIG') or ''
+# Cookie 登录：按行存，第 i 行对应 CONFIG 里的第 i 个账号；留空则该账号回退到账号密码登录
+cookies_raw = os.environ.get('COOKIE') or ''
 # server酱
-SCKEY = os.environ.get('SCKEY')
+SCKEY = os.environ.get('SCKEY') or ''
 
 # GeeTest V4 验证码 ID（从 ikuuu.org 提取）
 CAPTCHA_ID = 'cc96d05ba8b60f9112f76e18526fcb73'
@@ -17,92 +22,170 @@ check_url = '{}/user/checkin'.format(url)
 
 MAX_RETRIES = 3
 
+HEADER = {
+    'origin': url,
+    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+                  '(KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36',
+}
+
+
+def push(content):
+    """推送到 server酱"""
+    if not SCKEY:
+        return
+    try:
+        push_url = 'https://sctapi.ftqq.com/{}.send?title=机场签到&desp={}'.format(SCKEY, content)
+        requests.post(url=push_url, timeout=20)
+        print('推送成功')
+    except Exception as ex:
+        print('推送失败: %s' % ex)
+
+
+def clean_cookie(cookie):
+    """允许直接粘贴浏览器里的 Cookie 头，去掉换行与多余空白"""
+    return ' '.join(cookie.replace('\r', ' ').replace('\n', ' ').split()).strip().rstrip(';')
+
+
 def solve_captcha():
-        """使用 GeekedTest 求解 GeeTest V4 验证码（纯 Python，无需浏览器），支持重试"""
-        for attempt in range(1, MAX_RETRIES + 1):
-                try:
-                        print(f'验证码求解尝试 {attempt}/{MAX_RETRIES}...')
-                        geeked = Geeked(CAPTCHA_ID, 'ai')
-                        result = geeked.solve()
-                        print('验证码求解成功')
-                        return result
-                except Exception as ex:
-                        print(f'验证码求解失败 (尝试 {attempt}/{MAX_RETRIES}): {ex}')
-                        if attempt < MAX_RETRIES:
-                                wait = 2
-                                print(f'等待 {wait} 秒后重试...')
-                                time.sleep(wait)
-        print('所有重试均失败')
+    """使用 GeekedTest 求解 GeeTest V4 验证码（纯 Python，无需浏览器），支持重试"""
+    try:
+        from geeked import Geeked
+    except Exception as ex:
+        print('验证码求解器不可用: %s' % ex)
         return None
-
-def sign(order,user,pwd):
-        session = requests.session()
-        global url,SCKEY
-        header = {
-        'origin': url,
-        'user-agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36'
-        }
+    for attempt in range(1, MAX_RETRIES + 1):
         try:
-                print(f'===账号{order}进行登录...===')
-                print(f'账号：{user}')
-
-                # 求解 GeeTest V4 验证码
-                captcha = solve_captcha()
-                if captcha is None:
-                        print('验证码求解失败，跳过此账号')
-                        return
-
-                data = {
-                'email': user,
-                'passwd': pwd,
-                'captcha_result[lot_number]': captcha['lot_number'],
-                'captcha_result[captcha_output]': captcha['captcha_output'],
-                'captcha_result[pass_token]': captcha['pass_token'],
-                'captcha_result[gen_time]': captcha['gen_time'],
-                }
-
-                res = session.post(url=login_url,headers=header,data=data).text
-                print(res)
-                response = json.loads(res)
-                print(response['msg'])
-
-                if response.get('ret') != 1:
-                        print(f'登录失败: {response["msg"]}')
-                        content = f'登录失败: {response["msg"]}'
-                        if SCKEY != '':
-                                push_url = 'https://sctapi.ftqq.com/{}.send?title=机场签到&desp={}'.format(SCKEY, content)
-                                requests.post(url=push_url)
-                                print('推送成功')
-                        return
-
-                # 进行签到
-                res2 = session.post(url=check_url,headers=header).text
-                print(res2)
-                result = json.loads(res2)
-                print(result['msg'])
-                content = result['msg']
-                # 进行推送
-                if SCKEY != '':
-                        push_url = 'https://sctapi.ftqq.com/{}.send?title=机场签到&desp={}'.format(SCKEY, content)
-                        requests.post(url=push_url)
-                        print('推送成功')
+            print('验证码求解尝试 %d/%d...' % (attempt, MAX_RETRIES))
+            geeked = Geeked(CAPTCHA_ID, 'ai')
+            result = geeked.solve()
+            print('验证码求解成功')
+            return result
         except Exception as ex:
-                content = '签到失败'
-                print(content)
-                print("出现如下异常%s"%ex)
-                if SCKEY != '':
-                        push_url = 'https://sctapi.ftqq.com/{}.send?title=机场签到&desp={}'.format(SCKEY, content)
-                        requests.post(url=push_url)
-                        print('推送成功')
-        print('===账号{order}签到结束===\n'.format(order=order))
+            print('验证码求解失败 (尝试 %d/%d): %s' % (attempt, MAX_RETRIES, ex))
+            if attempt < MAX_RETRIES:
+                print('等待 2 秒后重试...')
+                time.sleep(2)
+    print('所有重试均失败')
+    return None
+
+
+def parse_result(text, status_code):
+    """把签到接口的返回解析成 (ok, msg)"""
+    text = (text or '').strip()
+    print(text)
+    if not text:
+        return False, '接口返回空内容（HTTP %s）' % status_code
+    try:
+        data = json.loads(text)
+    except Exception:
+        return False, '接口返回非 JSON（HTTP %s）: %s' % (status_code, text[:200])
+    msg = str(data.get('msg') or text)[:200]
+    return data.get('ret') == 1, msg
+
+
+def checkin_by_cookie(order, user, cookie):
+    """用已登录的 Cookie 直接签到，跳过登录与验证码"""
+    print('===账号%d[%s] 使用 Cookie 签到...===' % (order, user))
+    header = dict(HEADER)
+    header['cookie'] = cookie
+    header['referer'] = '%s/user' % url
+    try:
+        res = requests.post(url=check_url, headers=header, timeout=30)
+    except Exception as ex:
+        return False, '请求失败: %s' % ex
+
+    ok, msg = parse_result(res.text, res.status_code)
+    if ok:
+        print(msg)
+        return True, msg
+
+    low = msg.lower()
+    if any(k in msg for k in ('未登录', '请先登录', '登录后')) or 'login' in low:
+        msg = 'Cookie 已失效，请重新从浏览器复制: %s' % msg
+    print(msg)
+    return False, msg
+
+
+def checkin_by_login(order, user, pwd):
+    """原来的账号密码 + 验证码登录方式"""
+    session = requests.session()
+    header = dict(HEADER)
+    header['referer'] = '%s/auth/login' % url
+    try:
+        print('===账号%d[%s] 账号密码登录...===' % (order, user))
+
+        # 求解 GeeTest V4 验证码
+        captcha = solve_captcha()
+        if captcha is None:
+            return False, '验证码求解失败，跳过此账号'
+
+        data = {
+            'email': user,
+            'passwd': pwd,
+            'captcha_result[lot_number]': captcha['lot_number'],
+            'captcha_result[captcha_output]': captcha['captcha_output'],
+            'captcha_result[pass_token]': captcha['pass_token'],
+            'captcha_result[gen_time]': captcha['gen_time'],
+        }
+
+        r = session.post(url=login_url, headers=header, data=data)
+        ok, msg = parse_result(r.text, r.status_code)
+        print(msg)
+        if not ok:
+            return False, '登录失败: %s' % msg
+
+        # 进行签到
+        r = session.post(url=check_url, headers=header)
+        ok, msg = parse_result(r.text, r.status_code)
+        print(msg)
+        return ok, msg
+    except Exception as ex:
+        print('出现如下异常 %s' % ex)
+        return False, '签到失败: %s' % ex
+
+
+def main():
+    lines = [line.strip() for line in config.splitlines() if line.strip()]
+    if len(lines) == 0 or len(lines) % 2 != 0:
+        print('配置文件格式错误：CONFIG 需要按「用户名 / 密码」成对出现')
+        return 1
+
+    cookies = [clean_cookie(line) for line in cookies_raw.splitlines()]
+    while len(cookies) < len(lines) // 2:
+        cookies.append('')
+
+    ok_count = 0
+    fail = []
+    cookie_used = False
+    for i in range(len(lines) // 2):
+        user, pwd = lines[i * 2], lines[i * 2 + 1]
+        cookie = cookies[i] if i < len(cookies) else ''
+        if cookie:
+            cookie_used = True
+            ok, msg = checkin_by_cookie(i + 1, user, cookie)
+        else:
+            ok, msg = checkin_by_login(i + 1, user, pwd)
+        if ok:
+            ok_count += 1
+        else:
+            fail.append('%s: %s' % (user, msg))
+        print('===账号%d签到结束===\n' % (i + 1))
+
+    total = len(lines) // 2
+    print('签到结果：成功 %d / 共 %d' % (ok_count, total))
+    if fail:
+        print('失败明细：\n' + '\n'.join(fail))
+    push('成功 %d/%d\n%s' % (ok_count, total, '\n'.join(fail)))
+
+    if ok_count > 0:
+        return 0
+    # 没配 Cookie 时失败是验证码求解器的问题，报红只会天天发邮件，所以保持绿灯
+    if not cookie_used:
+        print('提示：未配置 COOKIE，当前走账号密码 + 验证码流程（验证码求解器如失效则无法签到）')
+        return 0
+    # 配了 Cookie 仍全部失败 = Cookie 过期或站点异常，需要人处理，让工作流变红
+    return 1
+
+
 if __name__ == '__main__':
-        configs = config.splitlines()
-        if len(configs) %2 != 0 or len(configs) == 0:
-                print('配置文件格式错误')
-                exit()
-        user_quantity = len(configs)
-        user_quantity = user_quantity // 2
-        for i in range(user_quantity):
-                user = configs[i*2]
-                pwd = configs[i*2+1]
-                sign(i,user,pwd)
+    sys.exit(main())
