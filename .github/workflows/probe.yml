@@ -12,6 +12,7 @@ jobs:
         env:
           COOKIE: ${{ secrets.COOKIE }}
         run: |
+          pip install -q requests
           echo "egress=$(curl -s https://api.ipify.org)"
           python - <<'EOF'
           import os, requests
@@ -26,3 +27,4 @@ jobs:
           import urllib3; print("urllib3", urllib3.__version__, "requests", requests.__version__)
           EOF
           curl -sS -o /dev/null -w 'curl %{http_code}\n' -X POST -H "cookie: $COOKIE" -H 'origin: https://ikuuu.top' -H 'referer: https://ikuuu.top/user' https://ikuuu.top/user/checkin
+
