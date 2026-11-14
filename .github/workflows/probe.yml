@@ -5,15 +5,24 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
-      - name: egress and endpoint probes
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: python vs curl
         env:
           COOKIE: ${{ secrets.COOKIE }}
         run: |
-          set -x
           echo "egress=$(curl -s https://api.ipify.org)"
-          curl -sS -o /dev/null -w 'get_home %{http_code}\n' -A 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36 Edg/139.0.0.0' https://ikuuu.top/
-          curl -sS -o /dev/null -w 'get_user_nocookie %{http_code} -> %{redirect_url}\n' -A 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36 Edg/139.0.0.0' https://ikuuu.top/user
-          curl -sS -o /dev/null -w 'post_checkin_nocookie %{http_code} -> %{redirect_url}\n' -A 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36 Edg/139.0.0.0' -X POST https://ikuuu.top/user/checkin
-          curl -sS -o /dev/null -w 'post_checkin_cookie %{http_code} -> %{redirect_url}\n' -A 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36 Edg/139.0.0.0' -X POST -H "cookie: $COOKIE" -H 'origin: https://ikuuu.top' -H 'referer: https://ikuuu.top/user' https://ikuuu.top/user/checkin
-          curl -sS -o /dev/null -w 'post_login %{http_code}\n' -A 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36 Edg/139.0.0.0' -X POST -H 'content-type: application/json' --data '{"email":"a@b.c","passwd":"x"}' https://ikuuu.top/auth/login
-          curl -sS -o /dev/null -w 'post_checkin_http1.0 %{http_code}\n' --http1.0 -A 'Mozilla/5.0' -X POST -H "cookie: $COOKIE" https://ikuuu.top/user/checkin
+          python - <<'EOF'
+          import os, requests
+          h = {"origin": "https://ikuuu.top", "referer": "https://ikuuu.top/user",
+               "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36 Edg/139.0.0.0",
+               "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+               "accept-language": "zh-CN,zh;q=0.9,en;q=0.8"}
+          ck = os.environ["COOKIE"]
+          for tag, headers in [("minimal", {"cookie": ck}), ("browser", dict(h, cookie=ck))]:
+              r = requests.post("https://ikuuu.top/user/checkin", headers=headers, timeout=30, allow_redirects=False)
+              print(f"python[{tag}] {r.status_code} len={len(r.text)} body={r.text[:80]!r}")
+          import urllib3; print("urllib3", urllib3.__version__, "requests", requests.__version__)
+          EOF
+          curl -sS -o /dev/null -w 'curl %{http_code}\n' -X POST -H "cookie: $COOKIE" -H 'origin: https://ikuuu.top' -H 'referer: https://ikuuu.top/user' https://ikuuu.top/user/checkin
