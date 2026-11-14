@@ -8,23 +8,28 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
-      - name: python vs curl
+      - name: replicate
         env:
+          URL: ${{ secrets.URL }}
           COOKIE: ${{ secrets.COOKIE }}
         run: |
-          pip install -q requests
-          echo "egress=$(curl -s https://api.ipify.org)"
+          pip install -q requests curl_cffi
           python - <<'EOF'
           import os, requests
-          h = {"origin": "https://ikuuu.top", "referer": "https://ikuuu.top/user",
-               "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36 Edg/139.0.0.0",
-               "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-               "accept-language": "zh-CN,zh;q=0.9,en;q=0.8"}
+          from curl_cffi import requests as creq
+          u = os.environ["URL"].strip().rstrip("/")
           ck = os.environ["COOKIE"]
-          for tag, headers in [("minimal", {"cookie": ck}), ("browser", dict(h, cookie=ck))]:
-              r = requests.post("https://ikuuu.top/user/checkin", headers=headers, timeout=30, allow_redirects=False)
-              print(f"python[{tag}] {r.status_code} len={len(r.text)} body={r.text[:80]!r}")
-          import urllib3; print("urllib3", urllib3.__version__, "requests", requests.__version__)
+          print("URL used:", u, "cookieLen:", len(ck))
+          base = {"origin": u, "referer": u + "/user", "cookie": ck}
+          h = dict(base)
+          h["user-agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36 Edg/139.0.0.0"
+          h["accept"] = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+          h["accept-language"] = "zh-CN,zh;q=0.9,en;q=0.8"
+          r = requests.post(u + "/user/checkin", headers=h, timeout=30, allow_redirects=False)
+          print("requests:", r.status_code, repr(r.text[:60]))
+          print("sent headers:", dict(r.request.headers))
+          r2 = creq.post(u + "/user/checkin", headers=base, impersonate="chrome", timeout=30, allow_redirects=False)
+          print("curl_cffi:", r2.status_code, repr(r2.text[:60]))
+          r3 = requests.post(u + "/user/checkin", headers={"cookie": ck}, timeout=30, allow_redirects=False)
+          print("requests-min:", r3.status_code, repr(r3.text[:60]))
           EOF
-          curl -sS -o /dev/null -w 'curl %{http_code}\n' -X POST -H "cookie: $COOKIE" -H 'origin: https://ikuuu.top' -H 'referer: https://ikuuu.top/user' https://ikuuu.top/user/checkin
-
