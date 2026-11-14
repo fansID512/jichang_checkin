@@ -2,6 +2,8 @@ import json
 import os
 import sys
 import time
+import urllib.parse
+from urllib.parse import urlparse
 
 import requests
 
@@ -90,9 +92,25 @@ def checkin_by_cookie(order, user, cookie):
     header['cookie'] = cookie
     header['referer'] = '%s/user' % url
     try:
-        res = requests.post(url=check_url, headers=header, timeout=30)
+        # 不自动跟随跳转：Cookie 失效时站点会 302 到 /auth/login，跟着跳会拿到一张 HTML 登录页
+        res = requests.post(url=check_url, headers=header, timeout=30, allow_redirects=False)
     except Exception as ex:
         return False, '请求失败: %s' % ex
+
+    if res.status_code in (301, 302, 303, 307, 308):
+        loc = res.headers.get('location') or ''
+        if 'auth/login' in loc:
+            return False, 'Cookie 已失效，请重新从浏览器复制（站点跳转到登录页）'
+        # 有些主题签到后跳回 /user，跟过去看页面提示
+        try:
+            follow = requests.get(urllib.parse.urljoin(url, loc), headers=header, timeout=30)
+        except Exception as ex:
+            return False, '签到后跳转到 %s，跟随失败: %s' % (loc, ex)
+        text = follow.text or ''
+        if any(k in text for k in ('签到成功', '已经签到', '已签到', '获得')):
+            print('签到后跳转到 %s，页面提示签到成功' % loc)
+            return True, '签到成功（页面提示）'
+        return False, '签到后跳转到 %s，未识别到成功提示（HTTP %s）' % (loc, follow.status_code)
 
     ok, msg = parse_result(res.text, res.status_code)
     if ok:
@@ -100,6 +118,8 @@ def checkin_by_cookie(order, user, cookie):
         return True, msg
 
     low = msg.lower()
+    if 'auth/login' in (res.text or '') or '<html' in low:
+        return False, 'Cookie 已失效，请重新从浏览器复制（返回了登录页面）'
     if any(k in msg for k in ('未登录', '请先登录', '登录后')) or 'login' in low:
         msg = 'Cookie 已失效，请重新从浏览器复制: %s' % msg
     print(msg)
@@ -119,9 +139,15 @@ def checkin_by_login(order, user, pwd):
         if captcha is None:
             return False, '验证码求解失败，跳过此账号'
 
+        # 站点用的是多阶段登录协议：必须带 phase=password，否则服务端直接返回
+        # {"result":"invalid_phase","msg":"登录流程无效，请刷新页面后重试。"}
         data = {
+            'host': urlparse(url).netloc,
+            'phase': 'password',
             'email': user,
             'passwd': pwd,
+            'remember_me': 'on',
+            'pageLoadedAt': int(time.time() * 1000),
             'captcha_result[lot_number]': captcha['lot_number'],
             'captcha_result[captcha_output]': captcha['captcha_output'],
             'captcha_result[pass_token]': captcha['pass_token'],
@@ -129,10 +155,18 @@ def checkin_by_login(order, user, pwd):
         }
 
         r = session.post(url=login_url, headers=header, data=data)
-        ok, msg = parse_result(r.text, r.status_code)
+        print(r.text)
+        try:
+            login_data = json.loads(r.text)
+        except Exception:
+            return False, '登录返回非 JSON（HTTP %s）: %s' % (r.status_code, (r.text or '')[:200])
+        msg = str(login_data.get('msg') or '')
+        if login_data.get('phase') != 'authenticated':
+            hint = ''
+            if login_data.get('result') == 'captcha_failed':
+                hint = '（验证码校验未通过，需改用 COOKIE 登录）'
+            return False, '登录失败: %s%s' % (msg or login_data.get('result'), hint)
         print(msg)
-        if not ok:
-            return False, '登录失败: %s' % msg
 
         # 进行签到
         r = session.post(url=check_url, headers=header)
