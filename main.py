@@ -7,6 +7,11 @@ from urllib.parse import urlparse
 
 import requests
 
+try:
+    from curl_cffi import requests as cffi_requests
+except Exception:  # curl_cffi 未安装时退回 requests
+    cffi_requests = None
+
 # 机场的地址
 url = (os.environ.get('URL') or '').strip().rstrip('/')
 # 配置：按行存 偶数行=用户名 奇数行=密码
@@ -90,12 +95,22 @@ def parse_result(text, status_code):
 def checkin_by_cookie(order, user, cookie):
     """用已登录的 Cookie 直接签到，跳过登录与验证码"""
     print('===账号%d[%s] 使用 Cookie 签到...===' % (order, user))
-    header = dict(HEADER)
-    header['cookie'] = cookie
-    header['referer'] = '%s/user' % url
+    header = {
+        'origin': url,
+        'referer': '%s/user' % url,
+        'cookie': cookie,
+    }
     try:
         # 不自动跟随跳转：Cookie 失效时站点会 302 到 /auth/login，跟着跳会拿到一张 HTML 登录页
-        res = requests.post(url=check_url, headers=header, timeout=30, allow_redirects=False)
+        if cffi_requests is not None:
+            # 站点的 Cloudflare 校验会按 TLS 指纹拦截 python-requests（403/405），
+            # 用 curl_cffi 模拟真实 Chrome 握手
+            res = cffi_requests.post(check_url, headers=header, impersonate='chrome',
+                                     timeout=30, allow_redirects=False)
+        else:
+            h = dict(HEADER)
+            h.update(header)
+            res = requests.post(url=check_url, headers=h, timeout=30, allow_redirects=False)
     except Exception as ex:
         return False, '请求失败: %s' % ex
 
